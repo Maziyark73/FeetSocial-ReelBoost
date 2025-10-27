@@ -1,18 +1,12 @@
 // lib imports
 const supabase = require('../../../lib/supabaseClient');
 
-/**
- * Fetch users with optional filters, pagination and join info.
- * Supabase doesn’t support eager-loading like Sequelize; if you need
- * related Social records, use the `includeSocial` flag to pull them via a
- * join in the .select() call.
- */
 const getUsers = async (
   filterPayload = {},
   pagination = { page: 1, pageSize: 10 },
   attributes = [],
   excludedUserIds,
-  order = [['createdAt', 'DESC']],
+  order = [['created_at', 'DESC']],
   include = []
 ) => {
   try {
@@ -20,29 +14,21 @@ const getUsers = async (
     const offset = (Number(page) - 1) * Number(pageSize);
     const limit = Number(pageSize);
 
-    // Build filters
     let query = supabase.from('users');
-
-    // Select columns; supabase expects a comma‑separated string or
-    // relationship syntax. Fallback to '*' if none provided.
     const selectCols = attributes.length ? attributes.join(',') : '*';
 
-    // Handle Social include; Supabase uses snake_case table names.
-    // If filterPayload.total_social is set, fetch that many socials per user.
     let selectWithRelations = selectCols;
     if (filterPayload.total_social && filterPayload.total_social > 0) {
-      // assuming the socials table is named "socials" and has user_id FK
-      selectWithRelations += `, social:*`; // adjust if your relationship name differs
+      selectWithRelations += ', socials(*)';
     }
 
     query = query.select(selectWithRelations, { count: 'exact' });
 
-    // Name conversions: use snake_case for column names
     if (filterPayload.user_name) {
       if (filterPayload.user_check) {
         query = query.eq('user_name', filterPayload.user_name);
       } else {
-        query = query.ilike('user_name', `${filterPayload.user_name}%`);
+        query = query.ilike('user_name', filterPayload.user_name + '%');
       }
     }
 
@@ -50,28 +36,25 @@ const getUsers = async (
     if (filterPayload.mobile_num) query = query.eq('mobile_num', filterPayload.mobile_num);
     if (filterPayload.user_id) query = query.eq('user_id', filterPayload.user_id);
 
-    if (!filterPayload.user_id && excludedUserIds?.length > 0) {
-      // exclude users in the list
-      query = query.not('user_id', 'in', `(${excludedUserIds.join(',')})`);
+    if (!filterPayload.user_id && excludedUserIds && excludedUserIds.length > 0) {
+      const ids = excludedUserIds.join(',');
+      query = query.not('user_id', 'in', '(' + ids + ')');
     }
 
     if (filterPayload.country) {
-      query = query.ilike('country', `${filterPayload.country}%`);
+      query = query.ilike('country', filterPayload.country + '%');
     }
 
     if (filterPayload.total_social && filterPayload.total_social > 0) {
-      // filter on total_socials > N
       query = query.gt('total_socials', filterPayload.total_social);
     }
 
-    // Ordering – Supabase expects separate calls for each order clause.
-    // Here we only support the first entry.
     if (order && order.length) {
       const [col, dir] = order[0];
-      query = query.order(col.replace(/([A-Z])/g, '_$1').toLowerCase(), { ascending: dir.toLowerCase() !== 'desc' });
+      const colSnake = col.replace(/([A-Z])/g, '_$1').toLowerCase();
+      query = query.order(colSnake, { ascending: dir.toLowerCase() !== 'desc' });
     }
 
-    // Pagination – Supabase uses .range(start, end)
     const start = offset;
     const end = offset + limit - 1;
     query = query.range(start, end);
@@ -95,34 +78,7 @@ const getUsers = async (
   }
 };
 
-/**
- * Find a single user. If `auth` is true, it only checks mobile_num + country_code.
- * If `deleted` is true, it checks userPayload as‐is.
- * Otherwise it performs an OR search on any provided fields.
- */
 async function getUser(userPayload, auth = false, deleted = false) {
-  // Build OR clauses for non-auth lookups
-  const orParts = [];
-
-  if (userPayload.mobile_num) {
-    orParts.push(`mobile_num.eq.${userPayload.mobile_num}`);
-  }
-  if (userPayload.country_code) {
-    orParts.push(`country_code.eq.${userPayload.country_code}`);
-  }
-  if (userPayload.user_name) {
-    orParts.push(`user_name.ilike.${userPayload.user_name}%`);
-  }
-  if (userPayload.email) {
-    orParts.push(`email.eq.${userPayload.email}`);
-  }
-  if (userPayload.user_id) {
-    orParts.push(`user_id.eq.${userPayload.user_id}`);
-  }
-  if (userPayload.country) {
-    orParts.push(`country.eq.${userPayload.country}`);
-  }
-
   try {
     if (auth) {
       const { data, error } = await supabase
@@ -139,6 +95,15 @@ async function getUser(userPayload, auth = false, deleted = false) {
       if (error) throw error;
       return data;
     } else {
+      const orParts = [];
+      
+      if (userPayload.mobile_num) orParts.push('mobile_num.eq.' + userPayload.mobile_num);
+      if (userPayload.country_code) orParts.push('country_code.eq.' + userPayload.country_code);
+      if (userPayload.user_name) orParts.push('user_name.ilike.' + userPayload.user_name + '%');
+      if (userPayload.email) orParts.push('email.eq.' + userPayload.email);
+      if (userPayload.user_id) orParts.push('user_id.eq.' + userPayload.user_id);
+      if (userPayload.country) orParts.push('country.eq.' + userPayload.country);
+
       if (!orParts.length) return null;
 
       const { data, error } = await supabase
@@ -156,9 +121,6 @@ async function getUser(userPayload, auth = false, deleted = false) {
   }
 }
 
-/**
- * Create a new user
- */
 async function createUser(userPayload) {
   try {
     const { data, error } = await supabase
@@ -175,13 +137,9 @@ async function createUser(userPayload) {
   }
 }
 
-/**
- * Update a user given a condition (object of equality constraints)
- */
 async function updateUser(userPayload, condition) {
   try {
     let query = supabase.from('users').update(userPayload);
-    // Apply all condition keys as equality filters
     Object.keys(condition || {}).forEach((key) => {
       query = query.eq(key, condition[key]);
     });
@@ -195,35 +153,26 @@ async function updateUser(userPayload, condition) {
   }
 }
 
-/**
- * Check if a user is private
- */
 async function isPrivate(userPayload) {
   try {
     const user = await getUser(userPayload);
-    return !!user?.is_private;
+    return !!user && !!user.is_private;
   } catch (error) {
     console.error('Error finding private user:', error);
     throw error;
   }
 }
 
-/**
- * Check if a user is an admin; return the user record or false
- */
 async function isAdmin(userPayload) {
   try {
     const user = await getUser(userPayload);
-    return user?.is_admin ? user : false;
+    return user && user.is_admin ? user : false;
   } catch (error) {
     console.error('Error finding admin user:', error);
     throw error;
   }
 }
 
-/**
- * Count users matching a payload
- */
 async function getUserCount(userPayload = {}) {
   try {
     const { count, error } = await supabase
@@ -239,12 +188,8 @@ async function getUserCount(userPayload = {}) {
   }
 }
 
-/**
- * Return raw user rows matching a payload (used in original code)
- */
 async function getUserCountData(userPayload = {}, extraOptions = {}) {
   try {
-    // extraOptions is unused here because Supabase doesn’t support arbitrary Sequelize opts
     const { data, error } = await supabase.from('users').select('*').match(userPayload);
     if (error) throw error;
     return data;
