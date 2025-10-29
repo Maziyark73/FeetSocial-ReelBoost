@@ -1,0 +1,43 @@
+# TOP PRIORITY FILES TO CONVERT (In Order)
+
+## CRITICAL - Convert These 6 Files First:
+
+1. src/service/repository/SocialMedia.service.js
+   Full path: /Users/maziyarkhademi-macmini/FeetSocial-reel-boost/reel-boost-backend/src/service/repository/SocialMedia.service.js
+
+2. src/service/repository/Comment.service.js
+   Full path: /Users/maziyarkhademi-macmini/FeetSocial-reel-boost/reel-boost-backend/src/service/repository/Comment.service.js
+
+3. src/service/repository/Like.service.js
+   Full path: /Users/maziyarkhademi-macmini/FeetSocial-reel-boost/reel-boost-backend/src/service/repository/Like.service.js
+
+4. src/service/repository/Follow.service.js
+   Full path: /Users/maziyarkhademi-macmini/FeetSocial-reel-boost/reel-boost-backend/src/service/repository/Follow.service.js
+
+5. src/service/repository/Save.service.js
+   Full path: /Users/maziyarkhademi-macmini/FeetSocial-reel-boost/reel-boost-backend/src/service/repository/Save.service.js
+
+6. src/service/repository/Block.service.js
+   Full path: /Users/maziyarkhademi-macmini/FeetSocial-reel-boost/reel-boost-backend/src/service/repository/Block.service.js
+
+## IMPORTANT - Next 10 Files:
+
+7. src/service/repository/Chat.service.js
+8. src/service/repository/Message.service.js
+9. src/service/repository/Media.service.js
+10. src/service/repository/Participant.service.js
+11. src/service/repository/Message_seen.service.js
+12. src/service/repository/Live.service.js
+13. src/service/repository/Live_host.service.js
+14. src/service/repository/notification.service.js
+15. src/service/repository/Taged.service.js
+16. src/service/repository/Report.service.js
+
+## HOW TO USE CURSOR:
+
+1. Open file in Cursor (Cmd+P, type filename)
+2. Select all (Cmd+A)
+3. Type: "Convert this Sequelize code to Supabase. Replace Model.create with insert, Model.findAll with select, Op.like with ilike, etc."
+4. Cursor will convert it inline
+5. Save file
+

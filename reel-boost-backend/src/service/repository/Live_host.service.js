@@ -1,14 +1,15 @@
-const { Op } = require('sequelize');
-const { Sequelize } = require('sequelize');
-const { v4: uuidv4 } = require('uuid');
-
-const { Live_host, User } = require("../../../models");
+const supabase = require('../../../lib/supabaseClient');
 
 
 async function createLiveHost(livePayload) {
     try {
-        const newLive = await Live_host.create(livePayload);
-        return newLive;
+        const { data, error } = await supabase
+            .from('live_hosts')
+            .insert([livePayload])
+            .select()
+            .maybeSingle();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error creating Live_host:', error);
         throw error;
@@ -16,71 +17,30 @@ async function createLiveHost(livePayload) {
 }
 async function getLiveLive_host(livePayload, pagination = { page: 1, pageSize: 10 }, excludedUserIds = []) {
     try {
-        // Destructure and ensure proper types for pagination values
         const { page = 1, pageSize = 10 } = pagination;
-        const offset = (Number(page) - 1) * Number(pageSize);
-        const limit = Number(pageSize);
+        const from = (Number(page) - 1) * Number(pageSize);
+        const to = from + Number(pageSize) - 1;
 
-        // Build the where condition
-        let wherecondition = { ...livePayload }; // Default to the provided payload
+        let query = supabase
+            .from('live_hosts')
+            .select('*, users:user_id(*)', { count: 'exact' })
+            .range(from, to)
+            .order('created_at', { ascending: false });
 
-        // if (livePayload.live_status == ""){
-        //     delete wherecondition.live_status
-        // }
+        Object.entries(livePayload || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
 
-        // Add pagination options to the payload
-        const query = {
-            where:wherecondition,
-            limit,
-            offset,
-            include: [
-                {
-                    model : User,
-                    attributes: {
-                        exclude: [
-                            "password",
-                            "otp",
-                            "social_id",
-                            "id_proof",
-                            "selfie",
-                            "device_token",
-                            "dob",
-                            "country_code",
-                            "mobile_num",
-                            "login_type",
-                            "gender",
-                            "state",
-                            "city",
-                            "bio",
-                            "login_verification_status",
-                            "is_private",
-                            "is_admin",
-                            "intrests",
-                            "socket_id",
-                            "available_coins",
-                            "account_name",
-                            "account_number",
-                            "bank_name",
-                            "swift_code",
-                            "IFSC_code"
-                        ],
-                    },
-                }
-            ],
-            order: [
-                ['createdAt', 'DESC'],
-            ],
-        };
-        
-        // Use findAndCountAll to get both rows and count
-        const { rows, count } = await Live_host.findAndCountAll(query);
-        
-        // Prepare the structured response
+        const { data: rows, count, error } = await query;
+        if (error) throw error;
+
         return {
-            Records: rows,
+            Records: rows || [],
             Pagination: {
-                total_pages: Math.ceil(count / pageSize),
-                total_records: Number(count),
+                total_pages: Math.ceil((count || 0) / pageSize),
+                total_records: Number(count) || 0,
                 current_page: Number(page),
                 records_per_page: Number(pageSize),
             },
@@ -92,23 +52,15 @@ async function getLiveLive_host(livePayload, pagination = { page: 1, pageSize: 1
 }
 async function updateLiveHost(livePayload, updateData, excludedUserIds = []) {
     try {
-        // Ensure the provided socialPayload matches the conditions for updating
-        // const { user_id, ...whereConditions } = socialPayload;
-
-        // Add the excluded user IDs condition if necessary
-        // const updateQuery = {
-        //     where: {
-        //         ...whereConditions,
-        //         user_id: {
-        //             [Sequelize.Op.notIn]: excludedUserIds, // Exclude user_ids from the list
-        //         }
-        //     },
-        // };
-
-        // Use the update method to update the records
-        const [updatedCount] = await Live_host.update(updateData, { where: livePayload });
-
-        // Return a structured response
+        let query = supabase.from('live_hosts').update(updateData);
+        Object.entries(livePayload || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+        const { data, error } = await query.select();
+        if (error) throw error;
+        const updatedCount = data ? data.length : 0;
         return {
             message: updatedCount > 0 ? 'Update successful' : 'No records updated',
             updated_count: updatedCount,

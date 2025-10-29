@@ -1,12 +1,15 @@
-const { Op } = require('sequelize');
-
-const { Like } = require("../../../models");
+const supabase = require('../../../lib/supabaseClient');
 
 
 async function createLike(likePayload) {
     try {
-        const newLike = await Like.create(likePayload);
-        return newLike;
+        const { data, error } = await supabase
+            .from('likes')
+            .insert([likePayload])
+            .select()
+            .maybeSingle();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error in like', error);
         throw error;
@@ -21,30 +24,25 @@ async function getLike(likePayload, includeOptions = [], attributesOptions = {} 
         const offset = (page - 1) * pageSize;
         const limit = pageSize;
 
-        // Build the query object
-        const query = {
-            where: {
-                ...likePayload,
-            },
-            include: includeOptions, // Dynamically include models,
-            attributes: attributesOptions,
-            limit,
-            offset,
-        };
-        
-        // Use findAndCountAll to get both rows and count
-        let { rows, count } = await Like.findAndCountAll(query);
-        
-        rows = rows.map((row) => {
-            return row.get()
-            
-        }); // This invokes Sequelize getters for each record
-        
+        let query = supabase.from('likes').select('*', { count: 'exact' });
+
+        // Apply filters
+        Object.entries(likePayload || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+
+        query = query.range(offset, offset + limit - 1);
+
+        const { data: rows, count, error } = await query;
+        if (error) throw error;
+
         return {
-            Records: rows,
+            Records: rows || [],
             Pagination: {
-                total_pages: Math.ceil(count / pageSize),
-                total_records: count,
+                total_pages: Math.ceil((count || 0) / pageSize),
+                total_records: count || 0,
                 current_page: page,
                 records_per_page: pageSize,
             },
@@ -55,10 +53,17 @@ async function getLike(likePayload, includeOptions = [], attributesOptions = {} 
     }
 }
 
-async function updateLike(likePayload, ) {
+async function updateLike(likePayload, likeCondition = {}) {
     try {
-        const updatedLike = await Like.update(likePayload, { where: likeCondition });
-        return updatedLike;
+        let query = supabase.from('likes').update(likePayload);
+        Object.entries(likeCondition || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+        const { data, error } = await query.select();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error in like', error);
         throw error;
@@ -67,8 +72,15 @@ async function updateLike(likePayload, ) {
 
 async function deleteLike(likePayload) {
     try {
-        const unLike = await Like.destroy({ where: likePayload });
-        return unLike;
+        let query = supabase.from('likes').delete();
+        Object.entries(likePayload || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+        const { error } = await query;
+        if (error) throw error;
+        return true;
     } catch (error) {
         console.error('Error in like', error);
         throw error;

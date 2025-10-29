@@ -1,11 +1,13 @@
-const { Op } = require('sequelize');
-
-const { Report_type } = require("../../../models");
+const supabase = require('../../../lib/supabaseClient');
 
 const getReport_types = async () => {
     try {
-        const report_types = await Report_type.findAll();
-        return report_types;
+        const { data, error } = await supabase
+            .from('report_types')
+            .select('*')
+            .order('created_at', { ascending: false });
+        if (error) throw error;
+        return data || [];
     } catch (error) {
         console.log(error);
         throw new Error("Could not retrieve report types");
@@ -13,17 +15,26 @@ const getReport_types = async () => {
 };
 
 async function getReport_type(reprtTypePayload) {
-    const is_report_type = await Report_type.findOne({
-        where: reprtTypePayload
+    let query = supabase.from('report_types').select('*');
+    Object.entries(reprtTypePayload || {}).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+            query = query.eq(key, value);
+        }
     });
-    
-    return is_report_type;
+    const { data, error } = await query.maybeSingle();
+    if (error) throw error;
+    return data;
 }
 
 async function createReportTypes(reprtTypePayload) {
     try {
-        const newReporttypes = await Report_type.create(reprtTypePayload);
-        return newReporttypes;
+        const { data, error } = await supabase
+            .from('report_types')
+            .insert([reprtTypePayload])
+            .select()
+            .maybeSingle();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error creating report type:', error);
         throw error;
@@ -31,8 +42,15 @@ async function createReportTypes(reprtTypePayload) {
 }
 async function updateReportTypes(reprtTypePayload, condition) {
     try {
-        const newReporttypes = await Report_type.update(reprtTypePayload, { where: condition });
-        return newReporttypes;
+        let query = supabase.from('report_types').update(reprtTypePayload);
+        Object.entries(condition || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+        const { data, error } = await query.select();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error updating report type:', error);
         throw error;

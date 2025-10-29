@@ -1,12 +1,15 @@
-const { Op } = require('sequelize');
-
-const { Block } = require("../../../models");
+const supabase = require('../../../lib/supabaseClient');
 
 
 async function createBlock(blockPayload) {
     try {
-        const newBlock = await Block.create(blockPayload);
-        return newBlock;
+        const { data, error } = await supabase
+            .from('blocks')
+            .insert([blockPayload])
+            .select()
+            .maybeSingle();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error in blocking:', error);
         throw error;
@@ -16,31 +19,33 @@ async function createBlock(blockPayload) {
 async function getblock(blockPayload, includeOptions = [], pagination = { page: 1, pageSize: 10 } , order = [['createdAt', 'DESC']]) {
     try {
         const { page, pageSize } = pagination;
-        
-        // Calculate offset and limit for pagination
         const offset = (page - 1) * pageSize;
         const limit = pageSize;
 
-        // Build the query object
-        const query = {
-            where: {
-                ...blockPayload,
-            },
-            include: includeOptions, // Dynamically include models
-            limit,
-            offset,
-            order: order, // Sorting by 'createdAt' in descending order
-        };
+        let query = supabase.from('blocks').select('*', { count: 'exact' });
 
-        // Use findAndCountAll to get both rows and count
-        const { rows, count } = await Block.findAndCountAll(query);
-        
-        // Prepare the structured response
+        Object.entries(blockPayload || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+
+        if (order && Array.isArray(order) && order.length > 0) {
+            let [orderBy, orderDir] = order[0];
+            orderBy = orderBy.replace(/([A-Z])/g, '_$1').toLowerCase();
+            query = query.order(orderBy, { ascending: orderDir.toUpperCase() !== 'DESC' });
+        }
+
+        query = query.range(offset, offset + limit - 1);
+
+        const { data: rows, count, error } = await query;
+        if (error) throw error;
+
         return {
-            Records: rows,
+            Records: rows || [],
             Pagination: {
-                total_pages: Math.ceil(count / pageSize),
-                total_records: count,
+                total_pages: Math.ceil((count || 0) / pageSize),
+                total_records: count || 0,
                 current_page: page,
                 records_per_page: pageSize,
             },
@@ -51,10 +56,17 @@ async function getblock(blockPayload, includeOptions = [], pagination = { page: 
     }
 }
 
-async function updateblock(blockPayload, blockCondition) {
+async function updateblock(blockPayload, blockCondition = {}) {
     try {
-        const updatedBlock = await Block.update(blockPayload, { where: blockCondition });
-        return updatedBlock;
+        let query = supabase.from('blocks').update(blockPayload);
+        Object.entries(blockCondition || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+        const { data, error } = await query.select();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error in block:', error);
         throw error;
@@ -62,8 +74,15 @@ async function updateblock(blockPayload, blockCondition) {
 }
 async function deleteBlock(blockPayload) {
     try {
-        const unBlock = await Block.destroy({ where: blockPayload });
-        return unBlock;
+        let query = supabase.from('blocks').delete();
+        Object.entries(blockPayload || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+        const { error } = await query;
+        if (error) throw error;
+        return true;
     } catch (error) {
         console.error('Error in Unblocking:', error);
         throw error;
@@ -72,9 +91,15 @@ async function deleteBlock(blockPayload) {
 
 async function isBlocked(blockPayload) {
     try {
-        const AlreadyBlocked = await Block.findOne({ where: blockPayload });
-        
-        return AlreadyBlocked;
+        let query = supabase.from('blocks').select('*');
+        Object.entries(blockPayload || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+        const { data, error } = await query.maybeSingle();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error in blocking:', error);
         throw error;

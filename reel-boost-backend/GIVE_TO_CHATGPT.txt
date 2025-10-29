@@ -1,0 +1,66 @@
+I'm migrating my Node.js/Express backend from Sequelize (MySQL) to Supabase (PostgreSQL). The database tables are already created in Supabase.
+
+Your task: Convert all Sequelize queries to Supabase queries while maintaining the same function signatures and return formats.
+
+CONVERSION RULES:
+
+1. IMPORTS:
+   REMOVE: const { Sequelize, Op } = require('sequelize');
+   REMOVE: const { ModelName } = require('../../../models');
+   ADD: const supabase = require('../../lib/supabaseClient');
+
+2. FIND ONE RECORD:
+   FROM: Model.findOne({ where: { field: value } })
+   TO: const { data, error } = await supabase.from('table_name').select('*').eq('field', value).maybeSingle()
+   if (error) throw error; return data;
+
+3. FIND MANY WITH PAGINATION:
+   FROM: Model.findAndCountAll({ where: {...}, limit: 10, offset: 0, order: [['field', 'DESC']] })
+   TO: const { data, count, error } = await supabase.from('table_name').select('*', { count: 'exact' }).eq('field', value).range(0, 9).order('field', { ascending: false })
+
+4. INSERT:
+   FROM: Model.create(payload)
+   TO: const { data, error } = await supabase.from('table_name').insert([payload]).select().maybeSingle()
+
+5. UPDATE:
+   FROM: Model.update(payload, { where: { id: 123 } })
+   TO: const { data, error } = await supabase.from('table_name').update(payload).eq('id', 123).select().maybeSingle()
+
+6. DELETE:
+   FROM: Model.destroy({ where: { id: 123 } })
+   TO: const { error } = await supabase.from('table_name').delete().eq('id', 123)
+
+7. OPERATORS:
+   Op.like -> .ilike('field', '%value%')  (case-insensitive)
+   Op.gt -> .gt('field', value)  (greater than)
+   Op.lt -> .lt('field', value)  (less than)
+   Op.gte -> .gte('field', value)  (greater or equal)
+   Op.lte -> .lte('field', value)  (less or equal)
+   Op.ne -> .neq('field', value)  (not equal)
+   Op.notIn -> .not('field', 'in', '(val1,val2,val3)')
+   Op.in -> .in('field', [val1, val2])
+
+8. OR CONDITIONS:
+   FROM: where: { [Op.or]: [{ field1: val1 }, { field2: val2 }] }
+   TO: .or('field1.eq.val1,field2.eq.val2')
+
+9. RELATIONSHIPS/JOINS:
+   FROM: include: [{ model: RelatedModel }]
+   TO: .select('*, related_table(*)') or multiple queries
+
+10. COLUMN NAMES:
+   Sequelize uses camelCase: createdAt, updatedAt, userId
+   Supabase uses snake_case: created_at, updated_at, user_id
+   Convert: createdAt -> created_at, updatedAt -> updated_at
+
+11. COUNT:
+   FROM: Model.count({ where: {...} })
+   TO: const { count, error } = await supabase.from('table_name').select('*', { count: 'exact', head: true }).match({...})
+
+12. MATCH (exact match on object):
+   .match({ field1: val1, field2: val2 })
+
+NOW CONVERT THIS FILE:
+[Paste the file contents you want to convert here]
+
+Return the complete converted file with all Sequelize code replaced with Supabase equivalents.

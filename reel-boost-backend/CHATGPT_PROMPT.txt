@@ -1,0 +1,77 @@
+I have a Node.js/Express backend (ReelBoost) that currently uses Sequelize with MySQL. I've already created all 37 database tables in Supabase using PostgreSQL. Now I need you to help me migrate the entire backend from Sequelize to Supabase.
+
+CURRENT STRUCTURE:
+- Backend folder: reel-boost-backend/
+- 50+ files use Sequelize (src/service/repository/*.js and src/controller/*.js)
+- Database: Already migrated to Supabase (37 tables created)
+- Supabase client: lib/supabaseClient.js (already initialized)
+
+KEY FILES TO CONVERT:
+1. src/service/repository/user.service.js (HIGHEST PRIORITY - START HERE)
+2. src/controller/user_controller/auth.controller.js
+3. src/controller/user_controller/User.Controller.js
+4. src/service/repository/SocialMedia.service.js
+5. src/controller/social_controller/social.controller.js
+... and 45+ more files
+
+WHAT NEEDS TO BE DONE:
+1. Replace Sequelize queries with Supabase client queries
+2. Convert Sequelize operators to Supabase equivalents
+3. Handle pagination properly (.range() instead of limit/offset)
+4. Convert relationships/joins to Supabase .select() syntax
+5. Update file uploads to use Supabase Storage
+6. Update authentication to use Supabase Auth
+7. Preserve all function signatures and return formats
+8. Maintain error handling
+
+CONVERSION PATTERNS:
+
+1. Find One:
+   FROM: User.findOne({ where: { user_id: 123 } })
+   TO: const { data, error } = await supabase.from('users').select('*').eq('user_id', 123).single()
+
+2. Find Many with Pagination:
+   FROM: User.findAndCountAll({ limit: 10, offset: 0 })
+   TO: const { data, count, error } = await supabase.from('users').select('*', { count: 'exact' }).range(0, 9)
+
+3. Insert:
+   FROM: User.create(payload)
+   TO: const { data, error } = await supabase.from('users').insert([payload]).select().single()
+
+4. Update:
+   FROM: User.update(payload, { where: { user_id: 123 } })
+   TO: const { data, error } = await supabase.from('users').update(payload).eq('user_id', 123)
+
+5. Delete:
+   FROM: User.destroy({ where: { user_id: 123 } })
+   TO: const { error } = await supabase.from('users').delete().eq('user_id', 123)
+
+6. Operators:
+   Op.like -> .ilike()
+   Op.gt -> .gt()
+   Op.lt -> .lt()
+   Op.ne -> .neq()
+   Op.notIn -> .not('in', '(${ids.join(',')})')
+
+7. Joins:
+   FROM: include: [{ model: Media }]
+   TO: .select('*, medias(*)')
+
+COLUMN NAMING:
+- Sequelize uses camelCase: userId, createdAt, updatedAt
+- Supabase uses snake_case: user_id, created_at, updated_at
+
+IMPORT STRUCTURE:
+- Replace: const { User } = require('../../../models')
+- With: const supabase = require('../../lib/supabaseClient')
+
+YOUR TASK:
+Provide me with the complete converted code for src/service/repository/user.service.js.
+
+Here's what I'll do:
+1. I'll paste the current file contents
+2. You convert it using the patterns above
+3. Provide the complete converted file
+4. I'll test and move to the next file
+
+Please wait for me to paste the first file.

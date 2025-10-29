@@ -1,13 +1,15 @@
-const { Op } = require('sequelize');
-const { Sequelize } = require('sequelize');
-
-const { Gift_category  } = require("../../../models");
+const supabase = require('../../../lib/supabaseClient');
 
 
 async function createGiftCategory(gift_categoryPayload) {
     try {
-        const newGiftCategory = await Gift_category.create(gift_categoryPayload);
-        return newGiftCategory;
+        const { data, error } = await supabase
+            .from('gift_categories')
+            .insert([gift_categoryPayload])
+            .select()
+            .maybeSingle();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error creating Gift Category:', error);
         throw error;
@@ -20,30 +22,24 @@ async function getGiftcategory(gift_categoryPayload, pagination = { page: 1, pag
         const offset = (Number(page) - 1) * Number(pageSize);
         const limit = Number(pageSize);
 
-        // Build the where condition--------------------------------------------------------
-        let wherecondition = { ...gift_categoryPayload }; // Default to the provided payload
+        let query = supabase
+            .from('gift_categories')
+            .select('*', { count: 'exact' })
+            .range(offset, offset + limit - 1)
+            .order('created_at', { ascending: false });
 
-        if (!gift_categoryPayload.user_id) {
-            wherecondition = {
-                ...wherecondition,
-                user_id: {
-                    [Sequelize.Op.notIn]: excludedUserIds, // Exclude user_ids from the list
-                },
-            };
+        Object.entries(gift_categoryPayload || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+
+        if (!gift_categoryPayload?.user_id && excludedUserIds && excludedUserIds.length > 0) {
+            query = query.not('user_id', 'in', `(${excludedUserIds.join(',')})`);
         }
 
-        // Add pagination options to the payload
-        const query = {
-            where:wherecondition,
-            limit,
-            offset,
-            order: [
-                ['createdAt', 'DESC'],
-            ],
-        };
-        
-        // Use findAndCountAll to get both rows and count
-        const { rows, count } = await Gift_category.findAndCountAll(query);
+        const { data: rows, count, error } = await query;
+        if (error) throw error;
         
         // Prepare the structured response
         return {
@@ -62,23 +58,15 @@ async function getGiftcategory(gift_categoryPayload, pagination = { page: 1, pag
 }
 async function updateGiftcategory(gift_categoryPayload, updateData, excludedUserIds = []) {
     try {
-        // Ensure the provided socialPayload matches the conditions for updating
-        // const { user_id, ...whereConditions } = socialPayload; 
-
-        // Add the excluded user IDs condition if necessary
-        // const updateQuery = {
-        //     where: {
-        //         ...whereConditions,
-        //         user_id: {
-        //             [Sequelize.Op.notIn]: excludedUserIds, // Exclude user_ids from the list
-        //         }
-        //     },
-        // };
-
-        // Use the update method to update the records
-        const [updatedCount] = await Gift_category.update(updateData, { where: gift_categoryPayload });
-
-        // Return a structured response
+        let query = supabase.from('gift_categories').update(updateData);
+        Object.entries(gift_categoryPayload || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+        const { data, error } = await query.select();
+        if (error) throw error;
+        const updatedCount = data ? data.length : 0;
         return {
             message: updatedCount > 0 ? 'Update successful' : 'No records updated',
             updated_count: updatedCount,
@@ -91,13 +79,17 @@ async function updateGiftcategory(gift_categoryPayload, updateData, excludedUser
 
 async function deleteGiftcategory(gift_categoryPayload) {
     try {
-        // Use the destroy method to delete the records
-        const deletedCount = await Gift_category.destroy({ where: gift_categoryPayload });
-
-        // Return a structured response
+        let query = supabase.from('gift_categories').delete();
+        Object.entries(gift_categoryPayload || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+        const { error } = await query;
+        if (error) throw error;
         return {
-            message: deletedCount > 0 ? 'Delete successful' : 'No records deleted',
-            deleted_count: deletedCount,
+            message: 'Delete successful',
+            deleted_count: 1,
         };
     } catch (error) {
         console.error('Error deleting Gift Category:', error);

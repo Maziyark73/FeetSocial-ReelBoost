@@ -1,10 +1,15 @@
-const { Message } = require("../../../models");
+const supabase = require('../../../lib/supabaseClient');
 const { toJSONWithAssociations } = require("../../helper/json.hleper");
 
 async function createMessage(messagePayload) {
     try {
-        const newMessage = await Message.create(messagePayload);
-        return newMessage;
+        const { data, error } = await supabase
+            .from('messages')
+            .insert([messagePayload])
+            .select()
+            .maybeSingle();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error in Creating Message', error);
         throw error;
@@ -19,29 +24,29 @@ async function getMessages(messagePayload, includeOptions = [], pagination = { p
         const offset = (page - 1) * pageSize;
         const limit = pageSize;
 
-        // Build the query object
-        const query = {
-            where: {
-                ...messagePayload,
-            },
-            include: includeOptions, // Dynamically include models
-            limit,
-            offset,
-            order: [["createdAt", "DESC"]], // Order by createdAt descending
-        };
+        let query = supabase
+            .from('messages')
+            .select('*, users:sender_id(*), chats:chat_id(*)', { count: 'exact' })
+            .order('created_at', { ascending: false })
+            .range(offset, offset + limit - 1);
 
-        // Use findAndCountAll to get both rows and count
-        const { rows, count } = await Message.findAndCountAll(query);
+        Object.entries(messagePayload || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
 
-        // Convert the rows (Sequelize model instances) to JSON with associations
-        const rowsData = await toJSONWithAssociations(rows, foreignKeysConfig);
+        const { data: rows, count, error } = await query;
+        if (error) throw error;
+
+        const rowsData = await toJSONWithAssociations(rows || [], foreignKeysConfig);
 
         // Prepare the structured response
         return {
             Records: rowsData,
             Pagination: {
-                total_pages: Math.ceil(count / pageSize),
-                total_records: count,
+                total_pages: Math.ceil((count || 0) / pageSize),
+                total_records: count || 0,
                 current_page: page,
                 records_per_page: pageSize,
             },
@@ -55,12 +60,15 @@ async function getMessages(messagePayload, includeOptions = [], pagination = { p
 
 async function updateMessage(filter, updateData) {
     try {
-        const updatedMessage = await Message.update(updateData, {
-            where: filter,
-            returning: true // Ensures it returns updated records (Sequelize-specific)
+        let query = supabase.from('messages').update(updateData);
+        Object.entries(filter || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
         });
-
-        return updatedMessage;
+        const { data, error } = await query.select();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error in Updating Message:', error);
         throw error;
@@ -69,8 +77,15 @@ async function updateMessage(filter, updateData) {
 
 const getMessage = async (messagePayload) => {
     try {
-        const isMessage = await Message.findOne({ where: messagePayload });
-        return isMessage;
+        let query = supabase.from('messages').select('*');
+        Object.entries(messagePayload || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+        const { data, error } = await query.maybeSingle();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error in fetching Message:', error);
         throw error;

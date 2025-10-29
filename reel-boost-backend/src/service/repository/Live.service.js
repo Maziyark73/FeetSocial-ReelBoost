@@ -1,14 +1,16 @@
-const { Op } = require('sequelize');
-const { Sequelize } = require('sequelize');
 const { v4: uuidv4 } = require('uuid');
-
-const { Live, User, Live_host } = require("../../../models");
+const supabase = require('../../../lib/supabaseClient');
 
 
 async function createLive(livePayload) {
     try {
-        const newLive = await Live.create(livePayload);
-        return newLive;
+        const { data, error } = await supabase
+            .from('lives')
+            .insert([livePayload])
+            .select()
+            .maybeSingle();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error creating Live:', error);
         throw error;
@@ -16,77 +18,42 @@ async function createLive(livePayload) {
 }
 async function getLive(livePayload, pagination = { page: 1, pageSize: 10 }, excludedUserIds = [], order = [['createdAt', 'DESC']]) {
     try {
-        // Destructure and ensure proper types for pagination values
         const { page = 1, pageSize = 10 } = pagination;
-        const offset = (Number(page) - 1) * Number(pageSize);
-        const limit = Number(pageSize);
+        const from = (Number(page) - 1) * Number(pageSize);
+        const to = from + Number(pageSize) - 1;
 
-        // Build the where condition
-        let wherecondition = { ...livePayload }; // Default to the provided payload
+        let query = supabase
+            .from('lives')
+            .select('*, live_hosts(*), users:user_id(*)', { count: 'exact' })
+            .range(from, to);
 
-        if (livePayload.live_status == "") {
-            delete wherecondition.live_status
+        // Apply filters
+        Object.entries(livePayload || {}).forEach(([key, value]) => {
+            if (value === undefined || value === null) return;
+            if (key === 'live_status' && value === '') return; // ignore empty
+            query = query.eq(key, value);
+        });
+
+        // Exclusions
+        if (!livePayload?.user_id && excludedUserIds && excludedUserIds.length > 0) {
+            query = query.not('user_id', 'in', `(${excludedUserIds.join(',')})`);
         }
 
-        // Add pagination options to the payload
-        const query = {
-            where: wherecondition,
-            limit,
-            offset,
-            include: [
-                {
-                    model: Live_host,
-                    include: [
-                        {
-                            model: User,
-                            attributes: {
-                                exclude: [
-                                    "password",
-                                    "otp",
-                                    "social_id",
-                                    "id_proof",
-                                    "selfie",
-                                    "device_token",
-                                    "dob",
-                                    // "country_code",
-                                    // "mobile_num",
-                                    // "login_type",
-                                    "gender",
-                                    "state",
-                                    "city",
-                                    "bio",
-                                    "login_verification_status",
-                                    "is_private",
-                                    "is_admin",
-                                    "intrests",
-                                    "socket_id",
-                                    "available_coins",
-                                    "account_name",
-                                    "account_number",
-                                    "bank_name",
-                                    "swift_code",
-                                    "IFSC_code"
-                                ],
-                            },
-                        }
-                    ],
-                    order: [
-                        ['createdAt', 'DESC'],
-                    ],
-                }
-            ],
-            order: order,
-        };
+        // Order (first clause only)
+        if (order && Array.isArray(order) && order.length > 0) {
+            let [orderBy, dir] = order[0];
+            orderBy = orderBy.replace(/([A-Z])/g, '_$1').toLowerCase();
+            query = query.order(orderBy, { ascending: dir.toUpperCase() !== 'DESC' });
+        }
 
-        // Use findAndCountAll to get both rows and count
-        const { rows, count } = await Live.findAndCountAll(query);
+        const { data: rows, count, error } = await query;
+        if (error) throw error;
 
-        // Prepare the structured response
         return {
-            Records: rows.map(row => row.toJSON()),
+            Records: rows || [],
             Pagination: {
-                total_pages: Math.ceil(count / pageSize),
-                total_records: Number(count),
+                total_pages: Math.ceil((count || 0) / pageSize),
+                total_records: Number(count) || 0,
                 current_page: Number(page),
                 records_per_page: Number(pageSize),
             },
@@ -98,23 +65,15 @@ async function getLive(livePayload, pagination = { page: 1, pageSize: 10 }, excl
 }
 async function updateLive(livePayload, updateData, excludedUserIds = []) {
     try {
-        // Ensure the provided socialPayload matches the conditions for updating
-        // const { user_id, ...whereConditions } = socialPayload;
-
-        // Add the excluded user IDs condition if necessary
-        // const updateQuery = {
-        //     where: {
-        //         ...whereConditions,
-        //         user_id: {
-        //             [Sequelize.Op.notIn]: excludedUserIds, // Exclude user_ids from the list
-        //         }
-        //     },
-        // };
-
-        // Use the update method to update the records
-        const [updatedCount] = await Live.update(updateData, { where: livePayload });
-
-        // Return a structured response
+        let query = supabase.from('lives').update(updateData);
+        Object.entries(livePayload || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+        const { data, error } = await query.select();
+        if (error) throw error;
+        const updatedCount = data ? data.length : 0;
         return {
             message: updatedCount > 0 ? 'Update successful' : 'No records updated',
             updated_count: updatedCount,
@@ -127,14 +86,17 @@ async function updateLive(livePayload, updateData, excludedUserIds = []) {
 
 async function deleteLive(livePayload) {
     try {
-        // Use the destroy method to delete the records
-
-        const [deletedCount] = await Live.update({ live_status: "stopped" }, { where: livePayload });
-
-        // Return a structured response
+        let query = supabase.from('lives').update({ live_status: 'stopped' });
+        Object.entries(livePayload || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+        const { data, error } = await query.select();
+        if (error) throw error;
         return {
-            message: deletedCount > 0 ? 'Delete successful' : 'No records deleted',
-            deleted_count: deletedCount,
+            message: (data && data.length) ? 'Delete successful' : 'No records deleted',
+            deleted_count: data ? data.length : 0,
         };
     } catch (error) {
         console.error('Error deleting Live:', error);
@@ -144,12 +106,15 @@ async function deleteLive(livePayload) {
 
 async function getLiveCount(livePayload) {
     try {
-
-        const count = await Live.count({
-            where: livePayload,
+        let query = supabase.from('lives').select('*', { count: 'exact', head: true });
+        Object.entries(livePayload || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
         });
-
-        return count;
+        const { count, error } = await query;
+        if (error) throw error;
+        return count || 0;
     } catch (error) {
         console.error('Error in Live count:', error);
     }

@@ -1,11 +1,15 @@
-const { Op } = require('sequelize');
-const { Language, sequelize, Sequelize } = require("../../../models");
+const supabase = require('../../../lib/supabaseClient');
 const { translateText } = require('../common/translate.service');
 
 async function createLanguage(languagePayload) {
     try {
-        const newLanguage = await Language.create(languagePayload);
-        return newLanguage;
+        const { data, error } = await supabase
+            .from('languages')
+            .insert([languagePayload])
+            .select()
+            .maybeSingle();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error creating Language:', error);
         throw error;
@@ -15,23 +19,34 @@ async function createLanguage(languagePayload) {
 async function getLanguages(filter = {}, pagination = { page: 1, pageSize: 10 }, order = [['createdAt', 'DESC']]) {
     try {
         const { page = 1, pageSize = 10 } = pagination;
-        const offset = (Number(page) - 1) * Number(pageSize);
-        const limit = Number(pageSize);
+        const from = (Number(page) - 1) * Number(pageSize);
+        const to = from + Number(pageSize) - 1;
 
-        const query = {
-            where: filter,
-            limit,
-            offset,
-            order,
-        };
+        let query = supabase
+            .from('languages')
+            .select('*', { count: 'exact' })
+            .range(from, to);
 
-        const { rows, count } = await Language.findAndCountAll(query);
+        Object.entries(filter || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+
+        if (order && Array.isArray(order) && order.length > 0) {
+            let [orderBy, dir] = order[0];
+            orderBy = orderBy.replace(/([A-Z])/g, '_$1').toLowerCase();
+            query = query.order(orderBy, { ascending: dir.toUpperCase() !== 'DESC' });
+        }
+
+        const { data: rows, count, error } = await query;
+        if (error) throw error;
 
         return {
-            Records: rows,
+            Records: rows || [],
             Pagination: {
-                total_pages: Math.ceil(count / pageSize),
-                total_records: Number(count),
+                total_pages: Math.ceil((count || 0) / pageSize),
+                total_records: Number(count) || 0,
                 current_page: Number(page),
                 records_per_page: Number(pageSize),
             },
@@ -44,11 +59,17 @@ async function getLanguages(filter = {}, pagination = { page: 1, pageSize: 10 },
 
 async function updateLanguage(filter, updateData) {
     try {
-
-        const [updatedCount] = await Language.update(updateData, { where: filter });
+        let query = supabase.from('languages').update(updateData);
+        Object.entries(filter || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+        const { data, error } = await query.select();
+        if (error) throw error;
         return {
-            message: updatedCount > 0 ? 'Update successful' : 'No records updated',
-            updated_count: updatedCount,
+            message: (data && data.length) ? 'Update successful' : 'No records updated',
+            updated_count: data ? data.length : 0,
         };
     } catch (error) {
         console.error('Error updating Language:', error);
@@ -56,103 +77,58 @@ async function updateLanguage(filter, updateData) {
     }
 }
 
+// NOTE: These operations require SQL DDL or server-side logic.
+// Create a Postgres function (RPC) in Supabase named 'create_language_translation'
+// that performs the column creation and initialization.
 async function createLanguageTranslation(language_payload) {
-    const queryInterface = sequelize.getQueryInterface();
-
     try {
-        const tableDescription = await queryInterface.describeTable(
-            "Language_translations"
-        );
-        if (!tableDescription[language_payload.language]) {
-            // If column does not exist
-            // Add the new column
-            await queryInterface.addColumn("Language_translations", language_payload.language, {
-                type: Sequelize.STRING,
-                allowNull: true, 
-            });
-          
-            // Update the newly added column with values from the 'key' column
-            await queryInterface.sequelize.query(`
-                UPDATE "Language_translations"
-                SET "${language_payload.language}" = "key"
-              `);
-              
-
-              
-        } else {
-        }
+        const { data, error } = await supabase.rpc('create_language_translation', language_payload);
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error creating Language Translation:', error);
         throw error;
     }
 }
 
+// TODO: Implement an RPC 'get_language_keywords' in Supabase for dynamic column selection
 async function getKeywords(filterPayload, pagination = { page: 1, pageSize: 10 }) {
     try {
-        const offset = (pagination.page - 1) * pagination.pageSize;
-
-        const results = await sequelize.query(
-            `SELECT "key_id", "key", "${filterPayload.language}" FROM "Language_translations" LIMIT :limit OFFSET :offset`,
-            {
-                replacements: { limit: pagination.pageSize, offset },
-                type: sequelize.QueryTypes.SELECT,
-            }
-        );
-
-        const totalResult = await sequelize.query(
-            `SELECT COUNT(*) as total FROM "Language_translations"`,
-            {
-                type: sequelize.QueryTypes.SELECT,
-            }
-        );
-
-        const total = parseInt(totalResult[0]?.total || 0, 10);
-        const totalPages = Math.ceil(total / pagination.pageSize);
-
-        const formattedResults = results.map((row) => ({
-            key_id: row.key_id,
-            key: row.key,
-            Translation: row[filterPayload.language],
-        }));
-
-        return {
-            Records: formattedResults,
-            Pagination: {
-                current_page: pagination.page,
-                records_per_page: pagination.pageSize,
-                total_records:total,
-                total_pages:totalPages,
-            },
-        };
+        const { data, error } = await supabase.rpc('get_language_keywords', {
+            language: filterPayload.language,
+            page: pagination.page,
+            page_size: pagination.pageSize,
+        });
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error fetching Language Keywords:', error);
         throw error;
     }
 }
 
-async function getLanguageTranslation( terget_language ){
+// TODO: Implement an RPC 'get_language_translation' that returns key->translation pairs
+async function getLanguageTranslation( target_language ){
     try {
-        const results = await sequelize.query(
-            `SELECT key_id, "key" FROM "Language_translations"`,
-            {
-                type: sequelize.QueryTypes.SELECT,
-            }
-        );
-        
-        const jsonData = results.reduce((acc, row) => {
-            acc[row.key_id] = row.key; // setting_id as key, 'key' value to be translated
-            return acc;
-        }, {});
-        const requestData = {
-            json_data: jsonData,
-            target_language: terget_language,
-          };
-        const res = await translateText(requestData)
-        return res
+        const { data, error } = await supabase.rpc('get_language_translation', { target_language });
+        if (error) throw error;
+        // Fallback: If RPC not set up, translate via external service using keys fetched client-side
+        if (!data) {
+            const { data: keys, error: keysErr } = await supabase
+                .from('language_translations')
+                .select('key_id,key');
+            if (keysErr) throw keysErr;
+            const jsonData = (keys || []).reduce((acc, row) => {
+                acc[row.key_id] = row.key;
+                return acc;
+            }, {});
+            const requestData = { json_data: jsonData, target_language };
+            return await translateText(requestData);
+        }
+        return data;
     } catch (error) {
         console.error('Error fetching Language Translation:', error);
         throw error;
-
     }
 }
 

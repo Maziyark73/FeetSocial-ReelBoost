@@ -1,11 +1,15 @@
-const { Message_seen } = require("../../../models");
+const supabase = require('../../../lib/supabaseClient');
 const { toJSONWithAssociations } = require("../../helper/json.hleper");
-const { Op } = require("sequelize");
 
 async function createMessageSeen(messagePayload) {
     try {
-        const newMessageSeen = await Message_seen.create(messagePayload);
-        return newMessageSeen;
+        const { data, error } = await supabase
+            .from('message_seens')
+            .insert([messagePayload])
+            .select()
+            .maybeSingle();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error in Creating MessageSeen', error);
         throw error;
@@ -14,11 +18,15 @@ async function createMessageSeen(messagePayload) {
 
 async function updateMessageSeen(filter, updateData) {
     try {
-        const updatedMessageSeen = await Message_seen.update(updateData, {
-            where: filter,
-            returning: true // Ensures it returns the updated records (Sequelize-specific)
+        let query = supabase.from('message_seens').update(updateData);
+        Object.entries(filter || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
         });
-        return updatedMessageSeen;
+        const { data, error } = await query.select();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error in Updating MessageSeen:', error);
         throw error;
@@ -33,29 +41,29 @@ async function getMessageSeen(messagePayload, includeOptions = [], pagination = 
         const offset = (page - 1) * pageSize;
         const limit = pageSize;
 
-        // Build the query object
-        const query = {
-            where: {
-                ...messagePayload,
-            },
-            include: includeOptions, // Dynamically include models
-            limit,
-            offset,
-            order: [["createdAt", "DESC"]], // Order by createdAt descending
-        };
+        let query = supabase
+            .from('message_seens')
+            .select('*, users:user_id(*), messages:message_id(*)', { count: 'exact' })
+            .order('created_at', { ascending: false })
+            .range(offset, offset + limit - 1);
 
-        // Use findAndCountAll to get both rows and count
-        const { rows, count } = await Message_seen.findAndCountAll(query);
+        Object.entries(messagePayload || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
 
-        // Convert the rows (Sequelize model instances) to JSON with associations
-        const rowsData = await toJSONWithAssociations(rows, foreignKeysConfig);
+        const { data: rows, count, error } = await query;
+        if (error) throw error;
+
+        const rowsData = await toJSONWithAssociations(rows || [], foreignKeysConfig);
 
         // Prepare the structured response
         return {
             Records: rowsData,
             Pagination: {
-                total_pages: Math.ceil(count / pageSize),
-                total_records: count,
+                total_pages: Math.ceil((count || 0) / pageSize),
+                total_records: count || 0,
                 current_page: page,
                 records_per_page: pageSize,
             },
@@ -68,29 +76,23 @@ async function getMessageSeen(messagePayload, includeOptions = [], pagination = 
 
 async function getMessageSeenCount({ andConditions = {}, orConditions = {} }) {
     try {
-        let whereCondition = {};
+        let query = supabase.from('message_seens').select('*', { count: 'exact', head: true });
 
-        // Handle AND conditions
-        if (Object.keys(andConditions).length > 0) {
-            whereCondition[Op.and] = Object.entries(andConditions).map(([key, value]) => ({
-                [key]: value,
-            }));
+        Object.entries(andConditions || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+
+        // Supabase .or() takes a CSV of conditions
+        const orParts = Object.entries(orConditions || {}).map(([key, value]) => `${key}.eq.${value}`);
+        if (orParts.length) {
+            query = query.or(orParts.join(','));
         }
 
-        // Handle OR conditions
-        if (Object.keys(orConditions).length > 0) {
-            whereCondition[Op.or] = Object.entries(orConditions).map(([key, value]) => ({
-                [key]: value,
-            }));
-        }
-
-        const query = {
-            where: whereCondition,
-        };
-
-        const count = await Message_seen.count(query);
-
-        return { count };
+        const { count, error } = await query;
+        if (error) throw error;
+        return { count: count || 0 };
     } catch (error) {
         console.error("Error in fetching MessageSeen counts:", error);
         throw error;

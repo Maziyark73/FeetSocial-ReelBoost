@@ -1,13 +1,16 @@
-const { Op } = require('sequelize');
-
-const { Chat } = require("../../../models");
+const supabase = require('../../../lib/supabaseClient');
 const { toJSONWithAssociations } = require('../../helper/json.hleper');
 
 
 async function createChat(chatPayload) {
     try {
-        const newChat = await Chat.create(chatPayload);
-        return newChat;
+        const { data, error } = await supabase
+            .from('chats')
+            .insert([chatPayload])
+            .select()
+            .maybeSingle();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error in Creating chat', error);
         throw error;
@@ -22,23 +25,22 @@ async function getChats(chatPayload, includeOptions = [], pagination = { page: 1
         const offset = (page - 1) * pageSize;
         const limit = pageSize;
 
-        // Build the query object
-        const query = {
-          where: {
-            ...chatPayload,
-          },
-          include: includeOptions, // Dynamically include models
-          order: [["createdAt", "DESC"]], // Sort by newest first
+        let query = supabase
+            .from('chats')
+            .select('*, messages(*), participants(*), users:created_by(*)', { count: 'exact' })
+            .order('created_at', { ascending: false })
+            .range(offset, offset + limit - 1);
 
-          limit,
-          offset,
-        };
+        Object.entries(chatPayload || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
 
-        // Use findAndCountAll to get both rows and count
-        const { rows, count } = await Chat.findAndCountAll(query);
+        const { data: rows, count, error } = await query;
+        if (error) throw error;
 
-
-        const rowsData = await toJSONWithAssociations(rows, foreignKeysConfig);
+        const rowsData = await toJSONWithAssociations(rows || [], foreignKeysConfig);
 
         
 
@@ -56,8 +58,8 @@ async function getChats(chatPayload, includeOptions = [], pagination = { page: 1
         return {
             Records: rowsData,
             Pagination: {
-                total_pages: Math.ceil(count / pageSize),
-                total_records: count,
+                total_pages: Math.ceil((count || 0) / pageSize),
+                total_records: count || 0,
                 current_page: page,
                 records_per_page: pageSize,
             },
@@ -70,15 +72,14 @@ async function getChats(chatPayload, includeOptions = [], pagination = { page: 1
 
 async function isGroup(chat_id) {
     try {
-        const is_group = await Chat.findOne(
-            {
-                where: {
-                    chat_id: chat_id,
-                    chat_type: "Group"
-                }
-            }
-        )
-        return is_group
+        const { data, error } = await supabase
+            .from('chats')
+            .select('*')
+            .eq('chat_id', chat_id)
+            .eq('chat_type', 'Group')
+            .maybeSingle();
+        if (error) throw error;
+        return data;
     }
     catch (error) {
         console.error("Error in checking group:", error);

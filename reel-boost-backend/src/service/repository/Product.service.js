@@ -1,13 +1,15 @@
-const { Op } = require('sequelize');
-const { Sequelize } = require('sequelize');
-
-const { Product, Product_Media, User } = require("../../../models");
+const supabase = require('../../../lib/supabaseClient');
 
 
 async function createProduct(productPayload) {
     try {
-        const newProduct = await Product.create(productPayload);
-        return newProduct;
+        const { data, error } = await supabase
+            .from('products')
+            .insert([productPayload])
+            .select()
+            .maybeSingle();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error creating Product:', error);
         throw error;
@@ -21,66 +23,31 @@ async function getProduct(productPayload, pagination = { page: 1, pageSize: 10 }
         const offset = (Number(page) - 1) * Number(pageSize);
         const limit = Number(pageSize);
 
-        // Build the where condition
-        let wherecondition = { ...productPayload }; // Default to the provided payload
+        // Build Supabase query with joins
+        let query = supabase
+            .from('products')
+            .select('*, product_medias:product_id(*), users:user_id(*)', { count: 'exact' })
+            .range(offset, offset + limit - 1);
 
-        // Check if 'user_id' is not provided, and apply exclusion only if excludedUserIds is not empty
-        if (!productPayload.user_id && excludedUserIds.length > 0) {
-            wherecondition.user_id = {
-                [Op.notIn]: excludedUserIds, // Exclude user_ids from the list
-            };
+        // Filters
+        Object.entries(productPayload || {}).forEach(([key, value]) => {
+            if (value === undefined || value === null) return;
+            if (key === 'product_title') {
+                query = query.ilike('product_title', `${value}%`);
+            } else {
+                query = query.eq(key, value);
+            }
+        });
+
+        if (!productPayload?.user_id && excludedUserIds && excludedUserIds.length > 0) {
+            query = query.not('user_id', 'in', `(${excludedUserIds.join(',')})`);
         }
 
-        // Check if 'product_title' is provided in the payload and apply LIKE search
-        if (productPayload.product_title) {
-            wherecondition.product_title = {
-                [Op.like]: `${productPayload.product_title}%`, // Apply LIKE condition for product title
-            };
-        }
+        // Order
+        query = query.order('created_at', { ascending: false });
 
-
-        // Prepare the query with pagination and include necessary models
-        const query = {
-            where: wherecondition,
-            limit,
-            offset,
-            include: [
-                {
-                    model: Product_Media, // Ensure Product_Media model is included correctly
-                },
-                {
-                    model: User, // Ensure User model is included correctly
-                    attributes: {
-                        exclude: [
-                            "password",
-                            "otp",
-                            "social_id",
-                            "id_proof",
-                            "selfie",
-                            "device_token",
-                            "email",
-                            "dob",
-                            "country_code",
-                            "mobile_num",
-                            "login_type",
-                            "gender",
-                            "state",
-                            "city",
-                            "bio",
-                            "login_verification_status",
-                            "is_private",
-                            "is_admin"
-                        ],
-                    },
-                }
-            ],
-            order: [
-                ['createdAt', 'DESC'], // Ensure sorting by creation date
-            ],
-        };
-
-        // Fetch products with the given query
-        const { rows, count } = await Product.findAndCountAll(query);
+        const { data: rows, count, error } = await query;
+        if (error) throw error;
 
         // Return the structured response with pagination
         return {
@@ -100,12 +67,15 @@ async function getProduct(productPayload, pagination = { page: 1, pageSize: 10 }
 
 async function updateProduct(productPayload, updateData) {
     try {
-
-
-        // Use the update method to update the records
-        const [updatedCount] = await Product.update(updateData, { where: productPayload });
-
-        // Return a structured response
+        let query = supabase.from('products').update(updateData);
+        Object.entries(productPayload || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+        const { data, error } = await query.select();
+        if (error) throw error;
+        const updatedCount = data ? data.length : 0;
         return {
             message: updatedCount > 0 ? 'Update successful' : 'No records updated',
             updated_count: updatedCount,
@@ -118,13 +88,17 @@ async function updateProduct(productPayload, updateData) {
 
 async function deleteProduct(productPayload) {
     try {
-        // Use the destroy method to delete the records
-        const deletedCount = await Product.destroy({ where: productPayload });
-
-        // Return a structured response
+        let query = supabase.from('products').delete();
+        Object.entries(productPayload || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+        const { error } = await query;
+        if (error) throw error;
         return {
-            message: deletedCount > 0 ? 'Delete successful' : 'No records deleted',
-            deleted_count: deletedCount,
+            message: 'Delete successful',
+            deleted_count: 1,
         };
     } catch (error) {
         console.error('Error deleting Product:', error);

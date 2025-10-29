@@ -1,13 +1,16 @@
-const { Op } = require('sequelize');
-
-const { Comment } = require("../../../models");
+const supabase = require('../../../lib/supabaseClient');
 const { getLike } = require('./Like.service');
 
 
 async function createComment(commentPayload) {
     try {
-        const newComment = await Comment.create(commentPayload);
-        return newComment;
+        const { data, error } = await supabase
+            .from('comments')
+            .insert([commentPayload])
+            .select()
+            .maybeSingle();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error in comment', error);
         throw error;
@@ -21,39 +24,37 @@ async function getComment(commentPayload, includeOptions = [], pagination = { pa
         const limit = Number(pageSize);
 
 
-        // Build the query object
-        const query = {
-            where: {
-                ...commentPayload,
-            },
-            include: includeOptions, // Dynamically include models
-            limit,
-            offset,
-            order: [
-                ['createdAt', 'DESC'], // Sorting by 'createdAt' in descending order
-            ],
-        };
-        
-        // Use findAndCountAll to get both rows and count
-        const { rows, count } = await Comment.findAndCountAll(query);
-        
+        // Build Supabase query
+        let query = supabase
+            .from('comments')
+            .select('*, users:comment_by(*)', { count: 'exact' })
+            .order('created_at', { ascending: false })
+            .range(offset, offset + limit - 1);
+
+        // Apply filters
+        Object.entries(commentPayload || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+
+        const { data: rows, count, error } = await query;
+        if (error) throw error;
+
         const rowsWithReplyCount = await Promise.all(
-            rows.map(async (comment) => {
-                const replyCount = await Comment.count({
-                    where: { comment_ref_id: comment.dataValues.comment_id },
-                });
-                
-                const likes  = await getLike({comment_id:comment.dataValues.comment_id})
-                const commentData = comment.get();
+            (rows || []).map(async (comment) => {
+                const { count: replyCount } = await supabase
+                    .from('comments')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('comment_ref_id', comment.comment_id);
 
-                if (commentData.commenter) {
-                    commentData.commenter = comment.commenter.get();
-                }
+                const likes = await getLike({ comment_id: comment.comment_id });
 
-                commentData.reply_count = replyCount;
-                commentData.like_count = likes.Pagination.total_records;
-
-                return commentData;
+                return {
+                    ...comment,
+                    reply_count: replyCount || 0,
+                    like_count: likes.Pagination.total_records,
+                };
             })
         );
 
@@ -76,8 +77,15 @@ async function getComment(commentPayload, includeOptions = [], pagination = { pa
 
 async function updateComent(commentPayload, condition) {
     try {
-        const updatedComment = await Comment.update(commentPayload, { where: condition });
-        return updatedComment;
+        let query = supabase.from('comments').update(commentPayload);
+        Object.entries(condition || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+        const { data, error } = await query.select();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error in update Comment', error);
         throw error;
@@ -86,8 +94,15 @@ async function updateComent(commentPayload, condition) {
 
 async function deleteComment(commentPayload) {
     try {
-        const unComment = await Comment.destroy({ where: commentPayload });
-        return unComment;
+        let query = supabase.from('comments').delete();
+        Object.entries(commentPayload || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+        const { error } = await query;
+        if (error) throw error;
+        return true;
     } catch (error) {
         console.error('Error in Deleting Comment', error);
         throw error;

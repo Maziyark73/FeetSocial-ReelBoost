@@ -1,5 +1,4 @@
-
-const { Notification, User, Media, Social, Gift } = require("../../../models");
+const supabase = require('../../../lib/supabaseClient');
 
 
 const getNotifications = async (
@@ -17,32 +16,33 @@ const getNotifications = async (
             delete filterPayload.view_status;
         }
 
-        const { rows, count } = await Notification.findAndCountAll({
-            where: filterPayload,
-            ...(attributes.length && { attributes }),
-            limit,
-            offset,
-            include: [
-                {
-                    model: User,
-                    as: 'notification_sender',
-                    attributes: ['user_id', 'user_name', 'profile_pic', 'full_name'],
-                },
-                {
-                    model: Gift,
-                },
-                {
-                    model: Social,
-                    include: [
-                        {
-                            model: Media,
+        let query = supabase
+            .from('notifications')
+            .select(`*,
+                notification_sender:sender_id(user_id,user_name,profile_pic,full_name),
+                gifts:gift_id(*),
+                socials:social_id(*, medias(*))
+            `, { count: 'exact' });
 
-                        }
-                    ],
-                },
-            ],
-            order: order,
+        // Apply filters
+        Object.entries(filterPayload || {}).forEach(([key, value]) => {
+            if (value === undefined || value === null) return;
+            if (key === 'view_status' && typeof value === 'string' && !value.trim()) return;
+            query = query.eq(key, value);
         });
+
+        // Order (first clause only)
+        if (order && Array.isArray(order) && order.length > 0) {
+            let [orderBy, dir] = order[0];
+            orderBy = orderBy.replace(/([A-Z])/g, '_$1').toLowerCase();
+            query = query.order(orderBy, { ascending: dir.toUpperCase() !== 'DESC' });
+        }
+
+        // Pagination
+        query = query.range(offset, offset + limit - 1);
+
+        const { data: rows, count, error } = await query;
+        if (error) throw error;
 
         return {
             Records: rows,
@@ -64,8 +64,13 @@ const getNotifications = async (
 async function createNotification(notificationPayload) {
     try {
 
-        const notification = await Notification.create(notificationPayload);
-        return notification;
+        const { data, error } = await supabase
+            .from('notifications')
+            .insert([notificationPayload])
+            .select()
+            .maybeSingle();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error creating notification:', error);
         throw error;
@@ -74,9 +79,15 @@ async function createNotification(notificationPayload) {
 
 async function updateNotification(notificationPayload, condition) {
     try {
-        const newNotification = await Notification.update(notificationPayload, { where: condition });
-
-        return newNotification;
+        let query = supabase.from('notifications').update(notificationPayload);
+        Object.entries(condition || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+        const { data, error } = await query.select();
+        if (error) throw error;
+        return data;
     } catch (error) {
         // console.error('Error updating Notification:', error);
         return
@@ -85,13 +96,15 @@ async function updateNotification(notificationPayload, condition) {
 
 async function deleteNotification(condition = {}) {
     try {
-        const deleted = await Notification.destroy({
-            where: condition
+        let query = supabase.from('notifications').delete();
+        Object.entries(condition || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
         });
-
-        return {
-            deletedCount: deleted
-        };
+        const { error } = await query;
+        if (error) throw error;
+        return { deletedCount: 1 };
     } catch (error) {
         console.error('Error deleting notification:', error);
         throw error;

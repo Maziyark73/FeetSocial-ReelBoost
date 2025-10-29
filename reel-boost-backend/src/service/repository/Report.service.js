@@ -1,4 +1,4 @@
-const { Report } = require("../../../models");
+const supabase = require('../../../lib/supabaseClient');
 
 const getReports = async (
     filterPayload = {},
@@ -10,13 +10,29 @@ const getReports = async (
         const { page = 1, pageSize = 10 } = pagination;
         const offset = (page - 1) * pageSize;
         
-        const { rows, count } = await Report.findAndCountAll({
-            where: filterPayload,
-            include, // dynamic associations
-            offset,
-            limit: pageSize,
-            order: order,
+        let query = supabase
+            .from('reports')
+            .select('*, report_types:report_type_id(*)', { count: 'exact' });
+
+        // Apply filters
+        Object.entries(filterPayload || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
         });
+
+        // Order (first clause only)
+        if (order && Array.isArray(order) && order.length > 0) {
+            let [orderBy, dir] = order[0];
+            orderBy = orderBy.replace(/([A-Z])/g, '_$1').toLowerCase();
+            query = query.order(orderBy, { ascending: dir.toUpperCase() !== 'DESC' });
+        }
+
+        // Pagination
+        query = query.range(offset, offset + pageSize - 1);
+
+        const { data: rows, count, error } = await query;
+        if (error) throw error;
 
         return {
             Records: rows,
@@ -37,20 +53,27 @@ const getReports = async (
 
 
 async function getReport(reprtPayload) {
-    // Perform the query with the "OR" conditions
-    const is_report = await Report.findOne({
-        where: {
-            reprtPayload
+    let query = supabase.from('reports').select('*');
+    Object.entries(reprtPayload || {}).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+            query = query.eq(key, value);
         }
     });
-    return is_report;
+    const { data, error } = await query.maybeSingle();
+    if (error) throw error;
+    return data;
 }
 
 async function createReportUser(reportPayload) {
     try {
 
-        const newReportUser = await Report.create(reportPayload);
-        return newReportUser;
+        const { data, error } = await supabase
+            .from('reports')
+            .insert([reportPayload])
+            .select()
+            .maybeSingle();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error creating report user:', error);
         throw error;
@@ -58,8 +81,15 @@ async function createReportUser(reportPayload) {
 }
 async function updateReportUser(reportPayload, condition) {
     try {
-        const newReportUser = await Report.update(reportPayload, { where: condition });
-        return newReportUser;
+        let query = supabase.from('reports').update(reportPayload);
+        Object.entries(condition || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+        const { data, error } = await query.select();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error updating report User:', error);
         throw error;
@@ -68,7 +98,7 @@ async function updateReportUser(reportPayload, condition) {
 
 module.exports = {
     getReports,
-    getReports,
+    getReport,
     createReportUser,
     updateReportUser,
 };

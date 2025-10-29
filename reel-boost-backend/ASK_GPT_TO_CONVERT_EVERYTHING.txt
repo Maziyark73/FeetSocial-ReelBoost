@@ -1,0 +1,65 @@
+Copy this entire prompt and paste it into ChatGPT (not me, your AI):
+
+---
+I have a Node.js/Express backend that uses Sequelize with MySQL. The database is already migrated to Supabase (PostgreSQL) with 37 tables. I need you to convert ALL remaining Sequelize code to Supabase.
+
+CURRENT STATUS:
+- Database: ✅ Supabase with 37 tables created
+- 1 File Already Converted: src/service/repository/user.service.js
+- 49 Files Remaining
+
+CONVERSION RULES:
+1. Replace: const { Sequelize, Op } = require('sequelize')
+   With: const supabase = require('../../lib/supabaseClient')
+
+2. Replace: const { Model } = require('../../../models')
+   Remove this - we use supabase directly
+
+3. FIND ONE:
+   FROM: Model.findOne({ where: { field: value } })
+   TO: const { data, error } = await supabase.from('table_name').select('*').eq('field', value).maybeSingle(); if (error) throw error; return data;
+
+4. FIND MANY:
+   FROM: Model.findAndCountAll({ where: {...}, limit, offset })
+   TO: const { data, count, error } = await supabase.from('table_name').select('*', { count: 'exact' }).eq('field', value).range(offset, offset+limit-1)
+
+5. INSERT:
+   FROM: Model.create(payload)
+   TO: const { data, error } = await supabase.from('table_name').insert([payload]).select().maybeSingle()
+
+6. UPDATE:
+   FROM: Model.update(payload, { where: { id: 123 } })
+   TO: const { data, error } = await supabase.from('table_name').update(payload).eq('id', 123).select().maybeSingle()
+
+7. DELETE:
+   FROM: Model.destroy({ where: { id: 123 } })
+   TO: const { error } = await supabase.from('table_name').delete().eq('id', 123)
+
+8. OPERATORS:
+   Op.like -> .ilike('field', 'value%')
+   Op.gt -> .gt('field', value)
+   Op.ne -> .neq('field', value)
+   Op.notIn -> .not('field', 'in', '(val1,val2)')
+
+9. OR CONDITIONS:
+   FROM: { [Op.or]: [{ f1: v1 }, { f2: v2 }] }
+   TO: .or('f1.eq.v1,f2.eq.v2')
+
+10. COUNT:
+   FROM: Model.count({ where: {...} })
+   TO: const { count } = await supabase.from('table_name').select('*', { count: 'exact', head: true }).match({...})
+
+11. COLUMN NAMES: Convert camelCase to snake_case (createdAt -> created_at)
+
+The converted user.service.js shows the correct patterns. Use it as reference.
+
+FILES TO CONVERT (Priority 1 - Start Here):
+1. src/controller/user_controller/auth.controller.js
+2. src/controller/user_controller/User.Controller.js
+3. src/controller/user_controller/updateProfile.controller.js
+4. src/middleware/authMiddleware.js
+
+Ask me for the file content one by one and I'll paste it. Convert each file completely maintaining all logic and function signatures.
+---
+
+Now ask ChatGPT: "Please help me convert these files from Sequelize to Supabase. I'll paste file #1 now:" and then paste the auth.controller.js content.

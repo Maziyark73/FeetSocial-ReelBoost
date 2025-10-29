@@ -1,12 +1,15 @@
-const { Op } = require('sequelize');
-
-const { Follow } = require("../../../models");
+const supabase = require('../../../lib/supabaseClient');
 
 
 async function createFollow(followPayload) {
     try {
-        const newFollow = await Follow.create(followPayload);
-        return newFollow;
+        const { data, error } = await supabase
+            .from('follows')
+            .insert([followPayload])
+            .select()
+            .maybeSingle();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error in following:', error);
         throw error;
@@ -15,31 +18,29 @@ async function createFollow(followPayload) {
 async function getFollow(followPayload, includeOptions = [], pagination = { page: 1, pageSize: 10 }) {
     try {
         let { page, pageSize } = pagination;
-        page = Number(page)
-        pageSize = Number(pageSize)
-        // Calculate offset and limit for pagination
+        page = Number(page);
+        pageSize = Number(pageSize);
         const offset = (page - 1) * pageSize;
         const limit = pageSize;
 
-        // Build the query object
-        const query = {
-            where: {
-                ...followPayload,
-            },
-            include: includeOptions, // Dynamically include models
-            limit,
-            offset,
-        };
+        let query = supabase.from('follows').select('*', { count: 'exact' });
 
-        // Use findAndCountAll to get both rows and count
-        const { rows, count } = await Follow.findAndCountAll(query);
+        Object.entries(followPayload || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
 
-        // Prepare the structured response
+        query = query.range(offset, offset + limit - 1);
+
+        const { data: rows, count, error } = await query;
+        if (error) throw error;
+
         return {
-            Records: rows,
+            Records: rows || [],
             Pagination: {
-                total_pages: Math.ceil(count / pageSize),
-                total_records: Number(count),
+                total_pages: Math.ceil((count || 0) / pageSize),
+                total_records: Number(count) || 0,
                 current_page: Number(page),
                 records_per_page: Number(pageSize),
             },
@@ -50,10 +51,17 @@ async function getFollow(followPayload, includeOptions = [], pagination = { page
     }
 }
 
-async function updateFollow(followPayload , followCondition) {
+async function updateFollow(followPayload , followCondition = {}) {
     try {
-        const updatedFollow = await Follow.update(followPayload, {where:followCondition});
-        return updatedFollow;
+        let query = supabase.from('follows').update(followPayload);
+        Object.entries(followCondition || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+        const { data, error } = await query.select();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error in following:', error);
         throw error;
@@ -61,8 +69,15 @@ async function updateFollow(followPayload , followCondition) {
 }
 async function deleteFollow(followPayload ) {
     try {
-        const unFollow = await Follow.destroy({where:followPayload});
-        return unFollow;
+        let query = supabase.from('follows').delete();
+        Object.entries(followPayload || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+        const { error } = await query;
+        if (error) throw error;
+        return true;
     } catch (error) {
         console.error('Error in unfollowing following:', error);
         throw error;
@@ -71,8 +86,15 @@ async function deleteFollow(followPayload ) {
 
 async function isFollow(followPayload) {
     try {
-        const AlreadyFollow = await Follow.findOne({ where: followPayload });
-        return AlreadyFollow;
+        let query = supabase.from('follows').select('*');
+        Object.entries(followPayload || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+        const { data, error } = await query.maybeSingle();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error in following:', error);
         throw error;

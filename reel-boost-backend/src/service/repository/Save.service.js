@@ -1,12 +1,15 @@
-const { Op } = require('sequelize');
-
-const { Save } = require("../../../models");
+const supabase = require('../../../lib/supabaseClient');
 
 
 async function createSave(savePayload) {
     try {
-        const newSave = await Save.create(savePayload);
-        return newSave;
+        const { data, error } = await supabase
+            .from('saves')
+            .insert([savePayload])
+            .select()
+            .maybeSingle();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error in save', error);
         throw error;
@@ -22,30 +25,24 @@ async function getSave(savePayload, includeOptions = [], attributesOptions = {} 
         const offset = (page - 1) * pageSize;
         const limit = pageSize;
 
-        // Build the query object
-        const query = {
-            where: {
-                ...savePayload,
-            },
-            include: includeOptions, // Dynamically include models,
-            attributes: attributesOptions,
-            limit,
-            offset,
-        };
-        
-        // Use findAndCountAll to get both rows and count
-        let { rows, count } = await Save.findAndCountAll(query);
-        
-        rows = rows.map((row) => {
-            return row.get()
-            
-        }); // This invokes Sequelize getters for each record
-        
+        let query = supabase.from('saves').select('*', { count: 'exact' });
+
+        Object.entries(savePayload || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+
+        query = query.range(offset, offset + limit - 1);
+
+        const { data: rows, count, error } = await query;
+        if (error) throw error;
+
         return {
-            Records: rows,
+            Records: rows || [],
             Pagination: {
-                total_pages: Math.ceil(count / pageSize),
-                total_records: count,
+                total_pages: Math.ceil((count || 0) / pageSize),
+                total_records: count || 0,
                 current_page: page,
                 records_per_page: pageSize,
             },
@@ -56,10 +53,17 @@ async function getSave(savePayload, includeOptions = [], attributesOptions = {} 
     }
 }
 
-async function updateSave(savePayload, ) {
+async function updateSave(savePayload, condition = {}) {
     try {
-        const updatedSave = await Save.update(savePayload, { where: savePayload });
-        return updatedSave;
+        let query = supabase.from('saves').update(savePayload);
+        Object.entries(condition || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+        const { data, error } = await query.select();
+        if (error) throw error;
+        return data;
     } catch (error) {
         console.error('Error in save', error);
         throw error;
@@ -68,8 +72,15 @@ async function updateSave(savePayload, ) {
 
 async function deleteSave(savePayload) {
     try {
-        const unSave = await Save.destroy({ where: savePayload });
-        return unSave;
+        let query = supabase.from('saves').delete();
+        Object.entries(savePayload || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                query = query.eq(key, value);
+            }
+        });
+        const { error } = await query;
+        if (error) throw error;
+        return true;
     } catch (error) {
         console.error('Error in save', error);
         throw error;
